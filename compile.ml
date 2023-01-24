@@ -213,7 +213,7 @@ let rec expr env e = match e.expr_desc with
        we want the value, look into the pile *)
 
     expr env e ++
-    movq (ind ~index:rdi rbp) (reg rdi)
+    movq (ind rbp) (reg rdi)
 
   | TEprint el ->
     
@@ -221,12 +221,35 @@ let rec expr env e = match e.expr_desc with
       code ++
       expr env e ++
       begin match e.expr_typ with
-      | Tint -> call "print_int"
+      | Tint | Tptr(_) -> call "print_int"
       | Tbool -> call "print_bool"
       | Tstring -> call "print_string"
-      | Twild -> call "print_nil"
+      | Twild | Tptrnil -> call "print_nil"
+      | Tstruct(stru) ->
+        let rec aux fieldli =
+        movq (ilab (alloc_string stru.s_name)) (reg rdi) ++
+        call "print_string" ++
+        begin match fieldli with
+        | [] -> nop
+        | fie :: reste_fields ->
+          movq (ilab "S_nextline") (reg rdi) ++
+          call "print_string" ++
+          movq (ind ~ofs:(fie.f_ofs) ~index:rdi rbp) (reg rdi) ++
+          (match fie.f_typ with
+          |  Tint | Tptr(_) -> call "print_int"
+          | Tbool -> call "print_bool"
+          | Tstring -> call "print_string"
+          | Twild | Tptrnil -> call "print_nil"
+          | _ -> failwith "im worried about how to print some types within structures")
+          (* missing Tmany within structures ? *)
+        end in
+        movq (ilab (alloc_string stru.s_name)) (reg rdi) ++
+        call "print_string" ++
+        aux stru.s_ordered_fields
       | _ -> failwith "im worried about how to print some types"
       end
+      ++ movq (ilab "S_nextline") (reg rdi)
+      ++ call "print_string"
     in List.fold_left print_ nop el
 
   | TEident x ->
@@ -353,7 +376,7 @@ let rec expr env e = match e.expr_desc with
     (* chercher l'adresse de e1, rajouter l'offset *)
 
     expr env {expr_desc = TEunop(Uamp, e1); expr_typ = Tptr e1.expr_typ} ++
-    movq (ind ~ofs:(-ofs) ~index:rdi rbp) (reg rdi)
+    movq (ind ~ofs:(-ofs) rbp) (reg rdi)
 
   | TEvars _ ->
 
@@ -552,6 +575,7 @@ allocz:
       label "S_nil" ++ string "<nil>" ++
       label "S_space" ++ string " " ++
       label "S_empty" ++ string "" ++
+      label "S_nextline" ++ string "\n" ++
       (Hashtbl.fold (fun l s d -> label l ++ string s ++ d) strings nop)
     ;
   }
